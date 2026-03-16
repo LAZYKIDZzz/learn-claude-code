@@ -31,27 +31,15 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv(override=True)
 
-# 根据环境变量选择 AI 提供商
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
-
-if AI_PROVIDER == "anthropic":
-    from anthropic import Anthropic
-    if os.getenv("ANTHROPIC_BASE_URL"):
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-    MODEL = os.environ.get("MODEL_ID", "claude-3-5-sonnet-20241022")
-elif AI_PROVIDER == "openai":
-    from openai import OpenAI
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL")
-    )
-    MODEL = os.getenv("MODEL_ID", "gpt-4")
-else:
-    raise ValueError(f"不支持的 AI_PROVIDER: {AI_PROVIDER}")
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL")
+)
+MODEL = os.getenv("MODEL_ID", "gpt-4")
 
 WORKDIR = Path.cwd()
 
@@ -322,50 +310,6 @@ TOOLS = [
 ]
 
 
-def agent_loop_anthropic(messages: list):
-    """Anthropic 的 agent 循环（带后台任务通知）"""
-    while True:
-        # 在 LLM 调用前清空后台通知并注入为系统消息
-        notifs = BG.drain_notifications()
-        if notifs and messages:
-            notif_text = "\n".join(
-                f"[bg:{n['task_id']}] {n['status']}: {n['result']}" for n in notifs
-            )
-            messages.append({
-                "role": "user",
-                "content": f"<background-results>\n{notif_text}\n</background-results>"
-            })
-            messages.append({
-                "role": "assistant",
-                "content": "Noted background results."
-            })
-
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
-        )
-        messages.append({"role": "assistant", "content": response.content})
-
-        # 如果不是工具调用，结束循环
-        if response.stop_reason != "tool_use":
-            return
-
-        # 处理工具调用
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
-
-                print(f"> {block.name}: {str(output)[:200]}")
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-
-        messages.append({"role": "user", "content": results})
-
-
 def agent_loop_openai(messages: list):
     """OpenAI 的 agent 循环（带后台任务通知）"""
     # 转换工具格式为 OpenAI 格式
@@ -442,8 +386,8 @@ def agent_loop_openai(messages: list):
             })
 
 
-# 根据提供商选择对应的循环函数
-agent_loop = agent_loop_anthropic if AI_PROVIDER == "anthropic" else agent_loop_openai
+# OpenAI 兼容接口的循环函数
+agent_loop = agent_loop_openai
 
 
 if __name__ == "__main__":

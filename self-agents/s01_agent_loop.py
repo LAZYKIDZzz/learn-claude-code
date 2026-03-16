@@ -26,34 +26,18 @@ import json
 import os
 import subprocess
 
-# 支持 Anthropic 和 OpenAI 两种接口
+# 仅使用 OpenAI 兼容接口
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# 根据环境变量选择使用哪个 AI 提供商
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")  # 默认使用 anthropic
+from openai import OpenAI
 
-if AI_PROVIDER == "anthropic":
-    from anthropic import Anthropic
-
-    # 如果设置了自定义 base_url，移除 auth token（用于代理场景）
-    if os.getenv("ANTHROPIC_BASE_URL"):
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-    client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-    MODEL = os.environ.get("MODEL_ID", "claude-3-5-sonnet-20241022")
-
-elif AI_PROVIDER == "openai":
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL")  # 支持自定义 base_url
-    )
-    MODEL = os.getenv("MODEL_ID", "gpt-4")
-else:
-    raise ValueError(f"不支持的 AI_PROVIDER: {AI_PROVIDER}")
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL")  # 支持自定义 base_url
+)
+MODEL = os.getenv("MODEL_ID", "gpt-4")
 
 # 系统提示词：告诉 AI 它的角色和工作目录
 SYSTEM = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
@@ -100,50 +84,6 @@ def run_bash(command: str) -> str:
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
         return "Error: Timeout (120s)"
-
-
-def agent_loop_anthropic(messages: list):
-    """
-    Anthropic 的 Agent 循环实现
-
-    核心模式：持续调用 LLM，执行工具，直到模型停止调用工具
-    """
-    while True:
-        # 1. 调用 LLM，传入对话历史和可用工具
-        response = client.messages.create(
-            model=MODEL,
-            system=SYSTEM,
-            messages=messages,
-            tools=TOOLS,
-            max_tokens=8000,
-        )
-
-        # 2. 将 AI 的回复添加到对话历史
-        messages.append({"role": "assistant", "content": response.content})
-
-        # 3. 如果模型没有调用工具，说明任务完成，退出循环
-        if response.stop_reason != "tool_use":
-            return
-
-        # 4. 执行每个工具调用，收集结果
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                # 打印正在执行的命令（黄色）
-                print(f"\033[33m$ {block.input['command']}\033[0m")
-                # 执行 bash 命令
-                output = run_bash(block.input["command"])
-                # 打印输出的前 200 个字符
-                print(output[:200])
-                # 构造工具结果
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": output
-                })
-
-        # 5. 将工具结果作为用户消息添加到对话历史
-        messages.append({"role": "user", "content": results})
 
 
 def agent_loop_openai(messages: list):
@@ -235,8 +175,8 @@ def agent_loop_openai(messages: list):
                 })
 
 
-# 根据 AI 提供商选择对应的循环函数
-agent_loop = agent_loop_anthropic if AI_PROVIDER == "anthropic" else agent_loop_openai
+# OpenAI 兼容接口的循环函数
+agent_loop = agent_loop_openai
 
 
 if __name__ == "__main__":

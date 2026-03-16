@@ -24,27 +24,15 @@ import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv(override=True)
 
-# 根据环境变量选择 AI 提供商
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
-
-if AI_PROVIDER == "anthropic":
-    from anthropic import Anthropic
-    if os.getenv("ANTHROPIC_BASE_URL"):
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-    MODEL = os.environ.get("MODEL_ID", "claude-3-5-sonnet-20241022")
-elif AI_PROVIDER == "openai":
-    from openai import OpenAI
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL")
-    )
-    MODEL = os.getenv("MODEL_ID", "gpt-4")
-else:
-    raise ValueError(f"不支持的 AI_PROVIDER: {AI_PROVIDER}")
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL")
+)
+MODEL = os.getenv("MODEL_ID", "gpt-4")
 
 # 工作目录：所有文件操作都限制在这个目录下
 WORKDIR = Path.cwd()
@@ -206,27 +194,6 @@ def parse_openai_arguments(raw: str) -> dict:
         return {"_parse_error": str(e), "_raw": raw}
 
 
-def agent_loop_anthropic(messages: list):
-    """Anthropic 的 agent 循环"""
-    while True:
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
-        )
-        messages.append({"role": "assistant", "content": response.content})
-        if response.stop_reason != "tool_use":
-            return
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                # 从分发器中获取对应的处理函数
-                handler = TOOL_HANDLERS.get(block.name)
-                output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                print(f"> {block.name}: {output[:200]}")
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
-        messages.append({"role": "user", "content": results})
-
-
 def agent_loop_openai(messages: list):
     """OpenAI 的 agent 循环"""
     # 转换工具定义为 OpenAI 格式（function calling）
@@ -266,7 +233,7 @@ def agent_loop_openai(messages: list):
             })
 
 
-agent_loop = agent_loop_anthropic if AI_PROVIDER == "anthropic" else agent_loop_openai
+agent_loop = agent_loop_openai
 
 
 if __name__ == "__main__":

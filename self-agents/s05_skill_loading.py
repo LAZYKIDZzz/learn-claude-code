@@ -41,26 +41,15 @@ import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv(override=True)
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
-
-if AI_PROVIDER == "anthropic":
-    from anthropic import Anthropic
-    if os.getenv("ANTHROPIC_BASE_URL"):
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-    MODEL = os.environ.get("MODEL_ID", "claude-3-5-sonnet-20241022")
-elif AI_PROVIDER == "openai":
-    from openai import OpenAI
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL")
-    )
-    MODEL = os.getenv("MODEL_ID", "gpt-4")
-else:
-    raise ValueError(f"不支持的 AI_PROVIDER: {AI_PROVIDER}")
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL")
+)
+MODEL = os.getenv("MODEL_ID", "gpt-4")
 
 WORKDIR = Path.cwd()
 SKILLS_DIR = WORKDIR / "skills"
@@ -255,33 +244,6 @@ TOOLS = [
 ]
 
 
-def agent_loop_anthropic(messages: list):
-    """Anthropic 的 agent 循环"""
-    while True:
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
-        )
-        messages.append({"role": "assistant", "content": response.content})
-
-        if response.stop_reason != "tool_use":
-            return
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
-
-                print(f"> {block.name}: {str(output)[:200]}")
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-
-        messages.append({"role": "user", "content": results})
-
-
 def agent_loop_openai(messages: list):
     """OpenAI 的 agent 循环"""
     openai_tools = [{
@@ -340,7 +302,7 @@ def agent_loop_openai(messages: list):
             })
 
 
-agent_loop = agent_loop_anthropic if AI_PROVIDER == "anthropic" else agent_loop_openai
+agent_loop = agent_loop_openai
 
 
 if __name__ == "__main__":

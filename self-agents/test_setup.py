@@ -26,7 +26,6 @@ def test_dependencies():
     print("\n🔍 检查依赖包...")
 
     packages = {
-        "anthropic": "Anthropic SDK",
         "openai": "OpenAI SDK",
         "dotenv": "python-dotenv"
     }
@@ -63,33 +62,13 @@ def test_env_file():
     from dotenv import load_dotenv
     load_dotenv(override=True)
 
-    # 检查配置
-    ai_provider = os.getenv("AI_PROVIDER", "anthropic")
-    print(f"   📌 AI_PROVIDER = {ai_provider}")
-
-    if ai_provider == "anthropic":
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if api_key and api_key != "your_anthropic_api_key_here":
-            print(f"   ✅ ANTHROPIC_API_KEY 已配置 ({api_key[:10]}...)")
-            return True
-        else:
-            print("   ❌ ANTHROPIC_API_KEY 未配置或使用默认值")
-            print("   💡 在 .env 中设置: ANTHROPIC_API_KEY=sk-ant-xxxxx")
-            return False
-
-    elif ai_provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        if api_key and api_key != "your_openai_api_key_here":
-            print(f"   ✅ OPENAI_API_KEY 已配置 ({api_key[:10]}...)")
-            return True
-        else:
-            print("   ❌ OPENAI_API_KEY 未配置或使用默认值")
-            print("   💡 在 .env 中设置: OPENAI_API_KEY=sk-xxxxx")
-            return False
-
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if api_key and api_key != "your_openai_api_key_here":
+        print(f"   ✅ OPENAI_API_KEY 已配置 ({api_key[:10]}...)")
+        return True
     else:
-        print(f"   ❌ 不支持的 AI_PROVIDER: {ai_provider}")
-        print("   💡 支持的值: anthropic 或 openai")
+        print("   ❌ OPENAI_API_KEY 未配置或使用默认值")
+        print("   💡 在 .env 中设置: OPENAI_API_KEY=sk-xxxxx")
         return False
 
 
@@ -100,50 +79,26 @@ def test_api_connection():
     from dotenv import load_dotenv
     load_dotenv(override=True)
 
-    ai_provider = os.getenv("AI_PROVIDER", "anthropic")
-
     try:
-        if ai_provider == "anthropic":
-            from anthropic import Anthropic
+        from openai import OpenAI
 
-            if os.getenv("ANTHROPIC_BASE_URL"):
-                os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL")
+        )
+        model = os.getenv("MODEL_ID", "gpt-4")
 
-            client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-            model = os.getenv("MODEL_ID", "claude-3-5-sonnet-20241022")
+        print(f"   📡 连接到 OpenAI API (模型: {model})...")
 
-            print(f"   📡 连接到 Anthropic API (模型: {model})...")
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Hi"}]
+        )
 
-            response = client.messages.create(
-                model=model,
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Hi"}]
-            )
-
-            print("   ✅ API 连接成功！")
-            print(f"   💬 测试响应: {response.content[0].text}")
-            return True
-
-        elif ai_provider == "openai":
-            from openai import OpenAI
-
-            client = OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                base_url=os.getenv("OPENAI_BASE_URL")
-            )
-            model = os.getenv("MODEL_ID", "gpt-4")
-
-            print(f"   📡 连接到 OpenAI API (模型: {model})...")
-
-            response = client.chat.completions.create(
-                model=model,
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Hi"}]
-            )
-
-            print("   ✅ API 连接成功！")
-            print(f"   💬 测试响应: {response.choices[0].message.content}")
-            return True
+        print("   ✅ API 连接成功！")
+        print(f"   💬 测试响应: {response.choices[0].message.content}")
+        return True
 
     except Exception as e:
         print(f"   ❌ API 连接失败: {e}")

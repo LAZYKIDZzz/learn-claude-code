@@ -28,26 +28,15 @@ import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv(override=True)
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
-
-if AI_PROVIDER == "anthropic":
-    from anthropic import Anthropic
-    if os.getenv("ANTHROPIC_BASE_URL"):
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-    MODEL = os.environ.get("MODEL_ID", "claude-3-5-sonnet-20241022")
-elif AI_PROVIDER == "openai":
-    from openai import OpenAI
-    client = OpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        base_url=os.getenv("OPENAI_BASE_URL")
-    )
-    MODEL = os.getenv("MODEL_ID", "gpt-4")
-else:
-    raise ValueError(f"不支持的 AI_PROVIDER: {AI_PROVIDER}")
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL")
+)
+MODEL = os.getenv("MODEL_ID", "gpt-4")
 
 WORKDIR = Path.cwd()
 
@@ -132,42 +121,6 @@ CHILD_TOOLS = [
 
 
 # -- 子 Agent：全新上下文，过滤的工具，只返回摘要 --
-def run_subagent_anthropic(prompt: str) -> str:
-    """
-    运行 Anthropic 子 Agent
-
-    参数:
-        prompt: 子 Agent 的任务描述
-
-    返回:
-        子 Agent 的最终文本摘要（中间过程被丢弃）
-    """
-    sub_messages = [{"role": "user", "content": prompt}]  # 全新的上下文
-
-    # 安全限制：最多 30 轮，防止无限循环
-    for _ in range(30):
-        response = client.messages.create(
-            model=MODEL, system=SUBAGENT_SYSTEM, messages=sub_messages,
-            tools=CHILD_TOOLS, max_tokens=8000,
-        )
-        sub_messages.append({"role": "assistant", "content": response.content})
-
-        if response.stop_reason != "tool_use":
-            break
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)[:50000]})
-
-        sub_messages.append({"role": "user", "content": results})
-
-    # 只有最终的文本返回给父 Agent -- 子 Agent 的上下文被丢弃
-    return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
-
-
 def run_subagent_openai(prompt: str) -> str:
     """运行 OpenAI 子 Agent"""
     openai_tools = [{
@@ -225,7 +178,7 @@ def run_subagent_openai(prompt: str) -> str:
     return message.content or "(no summary)"
 
 
-run_subagent = run_subagent_anthropic if AI_PROVIDER == "anthropic" else run_subagent_openai
+run_subagent = run_subagent_openai
 
 
 # -- 父 Agent 的工具：基础工具 + task 分发器 --
@@ -233,37 +186,6 @@ PARENT_TOOLS = CHILD_TOOLS + [
     {"name": "task", "description": "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
      "input_schema": {"type": "object", "properties": {"prompt": {"type": "string"}, "description": {"type": "string", "description": "Short description of the task"}}, "required": ["prompt"]}},
 ]
-
-
-def agent_loop_anthropic(messages: list):
-    """父 Agent 的循环（Anthropic）"""
-    while True:
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=PARENT_TOOLS, max_tokens=8000,
-        )
-        messages.append({"role": "assistant", "content": response.content})
-
-        if response.stop_reason != "tool_use":
-            return
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                if block.name == "task":
-                    # 处理子 Agent 调用
-                    desc = block.input.get("description", "subtask")
-                    print(f"> task ({desc}): {block.input['prompt'][:80]}")
-                    output = run_subagent(block.input["prompt"])
-                else:
-                    # 处理普通工具调用
-                    handler = TOOL_HANDLERS.get(block.name)
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-
-                print(f"  {str(output)[:200]}")
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-
-        messages.append({"role": "user", "content": results})
 
 
 def agent_loop_openai(messages: list):
@@ -325,7 +247,7 @@ def agent_loop_openai(messages: list):
             })
 
 
-agent_loop = agent_loop_anthropic if AI_PROVIDER == "anthropic" else agent_loop_openai
+agent_loop = agent_loop_openai
 
 
 if __name__ == "__main__":
