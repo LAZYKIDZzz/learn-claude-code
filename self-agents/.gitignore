@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 环境变量
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Agent 运行时文件
+.tasks/
+.transcripts/
+skills/
+
+# 测试文件
+test.py
+hello.txt
+greet.py
